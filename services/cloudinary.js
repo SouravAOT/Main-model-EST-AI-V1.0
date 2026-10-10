@@ -1,3 +1,4 @@
+
 import { v2 as cloudinary } from "cloudinary";
 
 let configured = false;
@@ -5,11 +6,20 @@ let configured = false;
 function configureCloudinary() {
   if (configured) return;
 
-  if (!process.env.CLOUDINARY_URL) {
-    throw new Error("CLOUDINARY_URL is not configured.");
+  const cloudName = process.env.CLOUDINARY_CLOUD_NAME;
+  const apiKey = process.env.CLOUDINARY_API_KEY;
+  const apiSecret = process.env.CLOUDINARY_SECRET_API_KEY;
+
+  if (!cloudName || !apiKey || !apiSecret) {
+    throw new Error(
+      "Cloudinary environment variables are missing."
+    );
   }
 
   cloudinary.config({
+    cloud_name: cloudName,
+    api_key: apiKey,
+    api_secret: apiSecret,
     secure: true
   });
 
@@ -24,7 +34,9 @@ export function uploadBuffer(buffer, options = {}) {
       {
         folder: options.folder || "est-ai",
         resource_type: options.resourceType || "auto",
-        public_id: options.publicId,
+        ...(options.publicId
+          ? { public_id: options.publicId }
+          : {}),
         overwrite: false
       },
       (error, result) => {
