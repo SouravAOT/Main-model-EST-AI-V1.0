@@ -1,18 +1,38 @@
-
 import { v2 as cloudinary } from "cloudinary";
 
 let configured = false;
 
+function readCloudinaryCredentials() {
+  const cloudUrl = process.env.CLOUDINARY_URL;
+  if (cloudUrl) {
+    try {
+      const parsed = new URL(cloudUrl);
+      if (parsed.protocol === "cloudinary:") {
+        return {
+          cloudName: parsed.hostname,
+          apiKey: decodeURIComponent(parsed.username),
+          apiSecret: decodeURIComponent(parsed.password)
+        };
+      }
+    } catch (error) {
+      throw new Error("CLOUDINARY_URL is invalid.");
+    }
+  }
+
+  return {
+    cloudName: process.env.CLOUDINARY_CLOUD_NAME,
+    apiKey: process.env.CLOUDINARY_API_KEY,
+    apiSecret: process.env.CLOUDINARY_API_SECRET || process.env.CLOUDINARY_SECRET_API_KEY
+  };
+}
+
 function configureCloudinary() {
   if (configured) return;
 
-  const cloudName = process.env.CLOUDINARY_CLOUD_NAME;
-  const apiKey = process.env.CLOUDINARY_API_KEY;
-  const apiSecret = process.env.CLOUDINARY_SECRET_API_KEY;
-
+  const { cloudName, apiKey, apiSecret } = readCloudinaryCredentials();
   if (!cloudName || !apiKey || !apiSecret) {
     throw new Error(
-      "Cloudinary environment variables are missing."
+      "Cloudinary configuration is incomplete. Set CLOUDINARY_URL or CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY and CLOUDINARY_API_SECRET."
     );
   }
 
@@ -34,17 +54,11 @@ export function uploadBuffer(buffer, options = {}) {
       {
         folder: options.folder || "est-ai",
         resource_type: options.resourceType || "auto",
-        ...(options.publicId
-          ? { public_id: options.publicId }
-          : {}),
+        ...(options.publicId ? { public_id: options.publicId } : {}),
         overwrite: false
       },
       (error, result) => {
-        if (error) {
-          reject(error);
-          return;
-        }
-
+        if (error) return reject(error);
         resolve(result);
       }
     );
