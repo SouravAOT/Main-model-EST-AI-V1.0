@@ -334,7 +334,6 @@ router.get("/", requireAuth, async (req, res) => {
     const snapshot = await db
       .collection("chats")
       .where("userId", "==", req.user.uid)
-      .limit(100)
       .get();
 
     const chats = snapshot.docs.map((doc) => ({
