@@ -91,7 +91,39 @@ async function getRecentMessages(chatRef) {
   }));
 }
 
+async function resolveOwnedAttachments(uid, attachments) {
+  if (!Array.isArray(attachments)) return [];
+  const filesRef = getDb().collection("users").doc(uid).collection("files");
+  const saved = [];
+  for (const item of attachments.slice(0, 20)) {
+    if (!item || typeof item !== "object") continue;
+    const id = cleanText(item.id, 150);
+    const url = cleanText(item.url, 2048);
+    let fileDoc = null;
+    if (id) {
+      const byId = await filesRef.doc(id).get();
+      if (byId.exists) fileDoc = byId;
+    }
+    if (!fileDoc && url) {
+      const byUrl = await filesRef.where("url", "==", url).limit(1).get();
+      if (!byUrl.empty) fileDoc = byUrl.docs[0];
+    }
+    if (!fileDoc) continue;
+    const data = fileDoc.data();
+    if (!data.url) continue;
+    saved.push({
+      id: fileDoc.id,
+      name: data.originalName || "Attachment",
+      mimeType: data.mimeType || "application/octet-stream",
+      size: Number(data.size) || 0,
+      url: data.url
+    });
+  }
+  return saved;
+}
+
 router.post("/", requireAuth, async (req, res) => {
+  let activeChatRef = null;
   try {
     const message = cleanText(req.body?.message);
 
@@ -118,15 +150,18 @@ router.post("/", requireAuth, async (req, res) => {
       chatId,
       message
     );
-
+    activeChatRef = chatRef;
+    const savedAttachments = await resolveOwnedAttachments(req.user.uid, req.body?.attachments);
     const code = exactCode(message);
-
-    await chatRef.collection("messages").add({
+    const userMessage = {
       userId: req.user.uid,
       role: "user",
       content: message,
       createdAt: FieldValue.serverTimestamp()
-    });
+    };
+    if (savedAttachments.length) userMessage.attachments = savedAttachments;
+    await chatRef.collection("messages").add(userMessage);
+    await chatRef.update({ updatedAt: FieldValue.serverTimestamp() });
 
     let codeNotice = null;
 
@@ -244,7 +279,8 @@ router.post("/", requireAuth, async (req, res) => {
           : 500;
 
     return res.status(status).json({
-      error: "Unable to process your message."
+      error: "Unable to process your message.",
+      chatId: activeChatRef?.id || null
     });
   }
 });
@@ -269,7 +305,7 @@ router.get("/:chatId/messages", requireAuth, async (req, res) => {
 
     const snapshot = await chatRef
       .collection("messages")
-      .orderBy("createdAt", "asc")
+      .orderBy("createdAt", "desc")
       .limit(200)
       .get();
 
@@ -277,7 +313,7 @@ router.get("/:chatId/messages", requireAuth, async (req, res) => {
       success: true,
       chatId: req.params.chatId,
       aiEffect: chatSnapshot.data()?.aiEffect || null,
-      messages: snapshot.docs.map((doc) => ({
+      messages: snapshot.docs.reverse().map((doc) => ({
         id: doc.id,
         ...doc.data()
       }))
@@ -298,17 +334,22 @@ router.get("/", requireAuth, async (req, res) => {
     const snapshot = await db
       .collection("chats")
       .where("userId", "==", req.user.uid)
-      .orderBy("updatedAt", "desc")
-      .limit(50)
+      .limit(100)
       .get();
 
-    return res.json({
-      success: true,
-      chats: snapshot.docs.map((doc) => ({
-        id: doc.id,
-        ...doc.data()
-      }))
-    });
+    const chats = snapshot.docs.map((doc) => ({
+      id: doc.id,
+      ...doc.data()
+    }));
+    const toMillis = (value) => {
+      if (value?.toMillis) return value.toMillis();
+      if (value?._seconds) return value._seconds * 1000;
+      const parsed = Date.parse(value || "");
+      return Number.isFinite(parsed) ? parsed : 0;
+    };
+    chats.sort((a, b) => toMillis(b.updatedAt) - toMillis(a.updatedAt));
+
+    return res.json({ success: true, chats: chats.slice(0, 50) });
   } catch (error) {
     console.error("Chats error:", error);
 
