@@ -269,8 +269,11 @@ async function apiFetch(path, options = {}) {
     let data = {};
     try { data = await response.json(); } catch (_) {}
     if (!response.ok) {
-      const message = data.error || `Request failed (${response.status})`;
-      throw new Error(message);
+      const error = new Error(data.error || `Request failed (${response.status})`);
+      error.status = response.status;
+      error.data = data;
+      error.chatId = data.chatId || null;
+      throw error;
     }
     return data;
   } catch (error) {
@@ -583,7 +586,7 @@ async function sendMessage() {
   try {
     const data = await apiFetch("/api/chat", {
       method: "POST",
-      body: JSON.stringify({ message: requestMessage, attachments: attachments.map(file => ({ name: file.name, mimeType: file.mimeType, url: file.url })), chatId: activeChatId, webSearch: webSearchMode, language: document.querySelector("#page-settings select")?.value || "auto", personaMode: window.EST_PERSONA_MODE || "normal" })
+      body: JSON.stringify({ message: requestMessage, attachments: attachments.map(file => ({ id: file.id, name: file.name, mimeType: file.mimeType, url: file.url })), chatId: activeChatId, webSearch: webSearchMode, language: document.querySelector("#page-settings select")?.value || "auto", personaMode: window.EST_PERSONA_MODE || "normal" })
     });
     if (data.available === false && data.type === "image_generation") {
       setMessageContent(pending, data.message || "Image generation is not available yet.");
@@ -609,6 +612,10 @@ async function sendMessage() {
     }
   } catch (error) {
     setMessageContent(pending, error.message || "Couldn't connect to Est Ai. Please try again.");
+    if (error.chatId) {
+      activeChatId = error.chatId;
+      await loadConversations();
+    }
     webSearchMode = false;
     input.placeholder = "Message Est Ai...";
   }
